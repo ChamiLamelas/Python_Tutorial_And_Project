@@ -1,0 +1,358 @@
+\documentclass{article}
+\usepackage[utf8]{inputenc}
+\usepackage{commath}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{hyperref}
+\usepackage{pgfplots}
+\usepackage{physics}
+\usepackage{ amssymb }
+\usepackage[top=2.5cm, left=3cm, right=3cm, bottom=4.0cm]{geometry}
+\usepackage{enumitem}
+\pgfplotsset{width=10cm,compat=1.9}
+\usepgfplotslibrary{external}
+\tikzexternalize
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue,
+    filecolor=magenta,      
+    urlcolor=cyan,
+}
+
+\usepackage{graphicx}
+\urlstyle{same}
+
+% make new command : single variable derivatives (i.e. non-partial)
+
+\newcommand{\svd}[2]{\frac{\mathrm{d}#1}{\mathrm{d}#2} }
+\newcommand{\svdi}[2]{\mathrm{d}#1/\mathrm{d}#2}
+\newcommand{\svddi}[2]{\mathrm{d}^2#1/\mathrm{d}#2^2}
+\newcommand{\svdd}[2]{\frac{\mathrm{d}^{2}{#1}}{\mathrm{d}{#2}^{2}} }
+
+\newcommand{\pad}[2]{\frac{\partial#1}{\partial#2} }
+\newcommand{\iig}[2]{\int #1 \mathrm{d}#2}
+\newcommand{\vc}[1]{\mathbf{#1}}
+
+\newcommand{\mybinom}[2]{\begin{bmatrix}#1 \\ #2 \end{bmatrix}}
+
+\title{Battleships
+}
+\author{Chami Lamelas}
+\date{August, 2021}
+
+\begin{document}
+
+\maketitle
+
+\section*{Introduction}
+Battleships is a naval combat game played between two players. Players place a collection of ships of varying lengths on two dimensional grids. Then, the players take turns taking shots at their opponents ships. A player retains their turn as long as they are hitting enemy ships. Once they miss, it's their opponent's turn. The first player to sink all of their opponent's ships wins the game. A single ship takes up some $k$ contiguous positions on the grid. A ship is sunk when all $k$ positions on the ship have been hit.\\\\
+A player cannot see their opponent's ships. However, they can keep track of their previous shots on a grid of their own. They can use their record to attempt to hit the opponent's ships. For this reason, it is safe to assume that a user will \textbf{not} try to fire at the same position multiple times. This is important as it will make writing some of the later functions easier.
+
+\subsection*{Game Overview}
+When two players typically play, there are four boards.
+\begin{itemize}
+    \item Player 1 Position Board : This is the board where player 1 positions their ships. When player 2 takes a shot, player 1 will use this board to tell them whether player 2 hit, miss, or sunk a ship. They will also use this board to track how much damage their ships have taken.
+    \item Player 1 Record Board : This is the board where player 1 records their hits and misses on player 2's ships.
+    \item Player 2 Position Board : This is the board where player 2 positions their ships. When player 1 takes a shot, player 2 will use this board to tell them whether player 1 hit, miss, or sunk a ship. They will also use this board to track how much damage their ships have taken.
+    \item Player 2 Record Board : This is the board where player 2 records their hits and misses on player 1's ships.
+\end{itemize}
+In our implementation, we will track all of this information in two 2D lists (\texttt{player1\_board} and \texttt{player2\_board}) and two lists (\texttt{player1\_ships} and \texttt{player2\_ships}).
+\begin{itemize}
+    \item \texttt{player1\_ships} : This will track how much life remains in each of player 1's ships. This list will be initialized with the starting lengths of the available ship types.  
+    \item \texttt{player2\_ships} : This will track how much life remains in each of player 2's ships. This list will be initialized with the starting lengths of the available ship types.  
+\end{itemize}
+Thus, the lists of ships will be nonnegative integers.
+\newpage
+\noindent Suppose that we start with $n$ ships. Then, the entries of the board can take on one of $n+3$ values.
+\begin{itemize}
+    \item \texttt{UNSEEN\_WATER < 0}: This represents that the board's owner has not placed a ship here, but the opponent has not seen this yet. 
+    \item \texttt{SEEN\_WATER < 0}: This represents that the board's owner has not placed a ship here and the opponent has discovered this by missing in some previous turn.
+    \item \texttt{SEEN\_SHIP < 0}: This represents that the board's owner has placed a ship here and the opponent has discovered this by hitting the ship here in some previous turn.
+    \item $0,\dots,n-1$: This will give the identifier of the ship that the board's owner has placed here but has not been discovered by the opponent. 
+\end{itemize}
+We can now define our two boards.
+\begin{itemize}
+    \item \texttt{player1\_board}: This is a 2D list that represents the board owned by player 1. Player 1 will position their ships on this board.
+    \begin{itemize}
+        \item \texttt{player1\_board[i][j] == UNSEEN\_WATER}: Player 1 has not placed a ship at $(i,j)$ but player 2 has not discovered this.
+        \item \texttt{player1\_board[i][j] == SEEN\_WATER}: Player 1 has not placed a ship at $(i,j)$ and player 2 has discovered this by missing in some previous turn.
+        \item \texttt{player1\_board[i][j] == SEEN\_SHIP}: Player 1 has placed a ship at $(i,j)$ and player 2 has discovered this by hitting it in some previous turn.
+        \item \texttt{player1\_board[i][j] == k >= 0}: Player 1 has placed a ship at $(i,j)$ but player 2 has not discovered this. \texttt{k} is the identifier of the ship that was placed here. This identifier is just the index of the ship in \texttt{player1\_ships}. Thus, if player 2 guesses this position, \texttt{player1\_ships[k]} should be decreased by 1 to show that the ship has 1 less life.
+    \end{itemize}
+    \item \texttt{player2\_board}: This is a 2D list that represents the board owned by player 2. Player 2 will position their ships on this board.
+    \begin{itemize}
+        \item \texttt{player2\_board[i][j] == UNSEEN\_WATER}: Player 2 has not placed a ship at $(i,j)$ but player 1 has not discovered this.
+        \item \texttt{player2\_board[i][j] == SEEN\_WATER}: Player 2 has not placed a ship at $(i,j)$ and player 1 has discovered this by missing in some previous turn.
+        \item \texttt{player2\_board[i][j] == SEEN\_SHIP}: Player 2 has placed a ship at $(i,j)$ and player 1 has discovered this by hitting it in some previous turn.
+        \item \texttt{player2\_board[i][j] == k >= 0}: Player 2 has placed a ship at $(i,j)$ but player 1 has not discovered this. \texttt{k} is the identifier of the ship that was placed here. This identifier is just the index of the ship in \texttt{player2\_ships}. Thus, if player 1 guesses this position, \texttt{player2\_ships[k]} should be decreased by 1 to show that the ship has 1 less life.
+    \end{itemize}
+\end{itemize}
+Now, we also need to convey to player 2 how well they are doing on \texttt{player1\_board} (and similarly how well player 1 is doing on \texttt{player2\_board}). However, we cannot simply print these 2D lists to the console or the opponents will discover where their opponents ships are hiding. So far, our description of \texttt{player1\_board}, \texttt{player2\_board}, \texttt{player1\_ships}, and \texttt{player2\_ships} will serve as an implementation of the position boards described at the beginning of the Game Overview section. However, we will implement the record boards via a special 2D list print function that will just show to player 2 their hits and misses on player 1's board and vice versa. 
+
+\section*{Provided Files}
+In this section, I will discuss the three files provided in the starter code and how you should use them.
+
+\subsection*{battleships\_constants.py}
+This file contains a collection of constants you should be using throughout your code to avoid the use of magic numbers. \textbf{You should not edit this file.} Some of these constants will make more sense when you start doing the tasks.
+
+\begin{itemize}
+    \item \texttt{UNSEEN\_WATER}: This represents the board value you should use to signify unseen water as discussed above. 
+    
+    \item \texttt{SEEN\_WATER}: This represents the board value you should use to signify seen water as discussed above. 
+    
+    \item \texttt{SEEN\_SHIP}: This represents the board value you should use to signify a seen ship as discussed above.
+    
+    \item \texttt{MISS\_MARKER}: When displaying player 1's progress on player 2's board, this is the character you should use to represent that player 1 has previously missed at this position (and similarly for player 2's progress on player 1's board). 
+    
+    \item \texttt{HIT\_MARKER}: When displaying player 1's progress on player 2's board, this is the character you should use to represent that player 1 has previously hit a ship at this position (and similarly for player 2's progress on player 1's board).
+    
+    \item \texttt{UNSEEN\_MARKER}: When displaying player 1's progress on player 2's board, this is the character you should use to represent that player 1 has not fired at this position (and similarly for player 2's progress on player 1's board).
+    
+    \item \texttt{MISS\_ID}: This signifies that a player's fire on a position missed.
+    
+    \item \texttt{HIT\_ID}: This signifies that a player's fire on a position hit.
+    
+    \item \texttt{SUNK\_ID}: This signifies that a player's fire on a position sunk a ship.
+    
+    \item \texttt{NORTH}: Players will be placing ships by specifying a position and then the direction it will point in. This signifies the north direction.
+    
+    \item \texttt{SOUTH}: This signifies the south direction.
+    
+    \item \texttt{EAST}: This signifies the east direction.
+    
+    \item \texttt{WEST}: This signifies the west direction.
+\end{itemize}
+
+\subsection*{battleships.py}
+In this file, you will be implementing a library of functions used for playing battleships. This includes creating and displaying boards (tasks 2.2,3.1, and 3.2), placing ships (tasks 2.1 and 4.1-4.4), and running and processing turns (tasks 5.1-5.3). You will notice that all the functions have a line \texttt{pass}. This is just a placeholder, you should remove it as you implement the functions.
+
+\subsection*{two\_player\_battleships.py}
+This file will be your client code. You will be writing four functions in this file that are particular to preparing (tasks 7.1 and 7.2) and running (tasks 8.1 and 8.2) a 2 player game. Also, when running this file, you will be running a two player battleship game. For the purpose of testing your code, you will need to write your script (task 9) inside of the if statement 
+\begin{verbatim}
+if __name__ == '__main__':
+\end{verbatim}
+You can ignore this if statement and can run this file as normal.
+
+\section{Imports in battleships.py}
+In order to implement \texttt{battleships.py}, which file(s) do you need to import? Feel free to use aliases. \\\\
+\textit{Hint:} Remember, you will be writing functions to initialize boards, place ships, and process turns.\\\\
+\textit{Related Reading:} 10.2, 10.3
+
+\section{Set-up Functions}
+In this task, you will be writing the general battleship set up functions in \texttt{battleships.py}.
+
+\subsection{copy\_list()}
+This function takes a list \texttt{ls} and returns a \textit{deep copy} of the list.\\\\
+\textit{Related Reading:} 6.1, 6.3, 7.3  
+
+\subsection{create\_board()}
+This function takes a positive integer \texttt{size} and creates a 2D list with dimensions \texttt{size} by \texttt{size} initialized with \texttt{UNSEEN\_WATER}.\\\\
+\textit{Related Reading:} 6.1, 6.3, 6.4
+
+\section{Displaying a Board}
+In this task, you will be writing the board display function in \texttt{battleships.py}.
+
+\subsection{get\_display\_symbol()}
+This function takes a 2D list \texttt{board} and tuple \texttt{pos} and returns the string \textit{display symbol} that corresponds to the value of \texttt{board[pos[0]][pos[1]]}. Suppose that \texttt{board} is player 1's board. The display symbol corresponding to \texttt{board[pos[0]][pos[1]]} is what player 2 could have recorded on that position.\\\\
+\textit{Hints:} What value(s) of \texttt{board[pos[0]][pos[1]]} corresponds to a \texttt{HIT\_MARKER}? \texttt{MISS\_MARKER}? \texttt{UNSEEN\_MARKER}?\\\\
+\textit{Related Reading:} 6.2, 6.4, 7.2
+
+\subsection{display\_board()}
+This function takes a 2D list \texttt{board} and prints a display to the opponent. If \texttt{board} is player 1's board, we would \texttt{display\_board(board)} to player 2. The displayed board must have the following form
+\begin{verbatim}
+ ? | ? | ?  
+---+---+---
+ ? | ? | ?
+---+---+---
+ ? | ? | ?
+\end{verbatim}
+You will replace ? with the appropriate display symbol for each index in the board. For example, if \texttt{board} is equivalent to
+\begin{verbatim}
+[[UNSEEN_WATER, UNSEEN_WATER, SEEN_SHIP], 
+ [SEEN_WATER, UNSEEN_WATER, SEEN_WATER], 
+ [UNSEEN_WATER, UNSEEN_WATER, UNSEEN_WATER]]
+\end{verbatim}
+Then \texttt{display\_board(board)} will print
+\begin{verbatim}
+   |   | x  
+---+---+---
+ o |   | o
+---+---+---
+   |   | 
+\end{verbatim}
+\textit{Hint:} Which function that you wrote can you use in this function?\\\\
+\textit{Related Reading:} 4.3, 5.2, 5.3, 6.2, 6.4
+
+\section{Arranging Ships}
+In this task, you will be writing the general battleship ship placement functions in \texttt{battleships.py}.
+
+\subsection{ship\_at\_pos()}
+This function takes a 2D list \texttt{board} and tuple \texttt{pos} and returns a boolean value of whether a ship is at \texttt{board[pos[0]][pos[1]]}. You may assume that \texttt{pos} will \textit{not} be a board position that has been seen by an opponent.\\\\
+\textit{Related Reading:} 3.2, 6.2, 6.4
+
+\subsection{place\_ship()}
+This function takes the following parameters
+\begin{itemize}
+    \item \texttt{board}: A 2D list.
+    \item \texttt{ships}: A list of the lengths of each ship. \texttt{ships[i]} gives the length of the ship with ID \texttt{i}.
+    \item \texttt{ship\_id}: The ID of the ship to place.
+    \item \texttt{pos}: The position to place the ship.
+    \item \texttt{direc}: The direction to place the ship in.
+\end{itemize}
+You may assume that \texttt{ship\_id} is a valid index in \texttt{ships}. You should only place \texttt{ships[ship\_id]} onto \texttt{board} if it can be placed onto the board without extending beyond the board or being put on top of another ship that has already been placed. If the ship was placed successfully, return \texttt{True}. If not, return \texttt{False}. For example, suppose you have \texttt{board}
+\begin{verbatim}
+[[UNSEEN_WATER, UNSEEN_WATER, UNSEEN_WATER], 
+ [UNSEEN_WATER, UNSEEN_WATER, UNSEEN_WATER], 
+ [UNSEEN_WATER, UNSEEN_WATER, UNSEEN_WATER]]
+\end{verbatim}
+\texttt{ships = [3,2]}, \texttt{ship\_id = 1}, \texttt{pos = (0,0)}, and \texttt{direc = `e'}. This ship can be placed successfully and should result in \texttt{board} being
+\begin{verbatim}
+[[1, 1, UNSEEN_WATER], 
+ [UNSEEN_WATER, UNSEEN_WATER, UNSEEN_WATER], 
+ [UNSEEN_WATER, UNSEEN_WATER, UNSEEN_WATER]]
+\end{verbatim}
+and \texttt{place\_ship} returning \texttt{True}. Note here, as discussed in the Game Overview, that we put the ID of the ship on the board where it is placed so that when hits are made on the ship, we can update the amount of life a player's ships have left.\\\\
+\textit{Hints:} Which function that you wrote can you use in this function? You can only place a ship successfully with certain constraints. Which constraints can you check directly and return early? Which constraints require more complex checks?\\\\
+\textit{Related Reading:} 3.1-3.3, 3.5, 4.2, 6.2, 8.4, 8.5
+
+\subsection{filtered\_print()}
+This function takes a list of integers \texttt{ls} and a list of booleans \texttt{filter} and prints the elements \texttt{ls[i]} where \texttt{filter[i]} is \texttt{True}. An empty string ``'' is printed for \texttt{ls[i]} where \texttt{filter[i]} is \texttt{False}. For example, if \texttt{ls=[5,9,0]} and \texttt{filter=[True,False,False]} then \texttt{filtered\_print(ls,filter)} prints
+\begin{verbatim}
+[5,,]
+\end{verbatim}
+You may assume that \texttt{ls} and \texttt{filter} have the same length.\\\\
+\textit{Related Reading:} 3.5, 4.2, 5.1-5.3, 6.2
+
+\subsection{place\_ships()}
+This function takes a 2D list \texttt{board} and list \texttt{ships} and places each ship onto the \texttt{board}. Your algorithm should do the following while there are still ships left to place.
+\begin{itemize}
+    \item Print which ships (in particular, their lengths) still need to be positioned. 
+    \item Prompt the user to position a ship. They will specify a ship ID, row, column, and direction separated by spaces. For example, to place ship 0 facing north at the 1st row 2nd column the user would enter \texttt{0 1 2 n}.
+    \item If the ship ID is valid and the corresponding ship hasn't been placed already, the ship is attempted to be placed. 
+\end{itemize}
+For example, suppose you have a board
+\begin{verbatim}
+[[UNSEEN_WATER, UNSEEN_WATER, UNSEEN_WATER], 
+ [UNSEEN_WATER, UNSEEN_WATER, UNSEEN_WATER], 
+ [UNSEEN_WATER, UNSEEN_WATER, UNSEEN_WATER]]
+\end{verbatim}
+and \texttt{ships = [3,2]}. Suppose we call \texttt{place\_ships(board, ships)}. The console interaction could look like:
+\begin{verbatim}
+[3,2]
+Position? 0 0 0 e
+[,2]
+Position? 1 1 1 w
+\end{verbatim}
+Here, the lengths of the ships that need to be positioned are printed first. Then, the user positions the 0th ship at (0,0) facing east. Now, only the 2 length ship is printed. Then, the user positions the 1st ship at (1,1) facing west. You can prompt and convey information to the user in whatever way you choose, but you \textbf{need} to include the lengths of the ships left to position before each iteration. \texttt{board} should end up as
+\begin{verbatim}
+[[0, 0, 0], 
+ [1, 1, UNSEEN_WATER], 
+ [UNSEEN_WATER, UNSEEN_WATER, UNSEEN_WATER]]
+\end{verbatim}
+You can assume that the user will enter ship ID (integer), row (integer), column (integer), and direction (string) separated by spaces. But remember, you will have to check the validity of the ship ID and whether a placement can be made.\\\\
+\textit{Hints:} This function is quite challenging. Here are some ideas on how to implement it.
+\begin{enumerate}
+    \item Notice in the example how the lengths of the ships that are not positioned are printed. Which function will print output matching this manner?
+    \item Based on your answer to hint 1, what other variables will you have to maintain which ships have been positioned?
+    \item Which function can you use to try to place a ship? Based on your answer, does the function tell you whether placement was successful?
+    \item Based on your answer to hint 3, you may need to parse the user input into a collection of variables. Which function can you use to do this?
+\end{enumerate}
+\textit{Related Reading:} 1.3, 3.3, 3.5, 4.1, 6.1-6.3, 8.6, 9.1, 9.2
+
+\section{Player Turns}
+In this task, you will be writing the general battleship turn execution and processing functions in \texttt{battleships.py}.
+
+\subsection{next\_player()}
+This function does not take any input or produce any output. It will be used when switching between turns when playing the battleship game. All it should do is prompt the user to enter something and press enter.\\\\
+\textit{Hint:} It should only be 1 line of code.\\\\
+\textit{Related reading:} 9.1
+
+\subsection{player\_turn()}
+This function should implement interaction with a player during their turn. It takes an integer board size (\texttt{size}) as an input parameter. As noted in the Introduction, players will take shots at their opponents ships. They will be entering a row and column to shoot at separated by a space. This function should keep asking the user to enter a valid row and column. You can assume that the user will always input two integers separated by a space. Once a valid row and column are input, return them as a tuple.\\\\
+\textit{Hint:} Why do you think the \texttt{size} parameter is provided?\\\\
+\textit{Related Reading:} 1.3, 3.3, 3.5, 4.1, 7.2, 9.1, 9.2
+
+\subsection{process\_turn()}
+This function takes a 2D list \texttt{board}, list of \texttt{ships}, and a tuple \texttt{pos}. \texttt{pos} will be the position a player fired at in \texttt{player\_turn()} (so you can assume it's on the \texttt{board}). This function should do the following:
+\begin{itemize}
+    \item If firing at \texttt{pos} hits a ship, you should lower the ship's health in \texttt{ships}. You should also update \texttt{board} to note that the player has seen a ship here. If this sunk the ship, return \texttt{SUNK\_ID}, otherwise return \texttt{HIT\_ID}. 
+    \item If firing at \texttt{pos} hit water, update \texttt{board} to note that the player has seen water there. Then, return \texttt{MISS\_ID}.  
+\end{itemize}
+\textit{Hints:} This function is also somewhat complicated.
+\begin{enumerate}
+    \item How will you identify which ship in \texttt{ships} should have its health lowered? What are we storing in \texttt{board} at the start of the game?
+    \item How do we determine if this hit sunk the ship as opposed to just hitting it?
+    \item How will we be updating \texttt{board} in this function when we see water or a ship? 
+\end{enumerate}
+\textit{Related Reading:} 3.3, 3.5, 3.6, 6.2, 6.4, 8.4-8.6
+
+\section{Imports in two\_player\_battleships.py}
+In order to implement \texttt{two\_player\_battleships.py}, which file(s) do you need to import? Feel free to use aliases. \\\\
+\textit{Hints:} Remember, you will be writing functions that are specific to a two player game, but will have a variety of existing battleships functions to start with. Also, one of the primary functions you will be implementing is \texttt{play\_game()} which will need to take into account turn results.
+
+\section{Preparing a 2 Player Game}
+In this task, you will be writing the 2 player battleship set up functions in \texttt{two\_player\_battleships.py}.
+
+\subsection{init\_boards\_and\_ships()}
+This function takes a list of \texttt{ships} that are available for a 2 player game and a board size \texttt{size}. You may assume \texttt{size > 0}. You will need to return four values
+\begin{itemize}
+    \item \texttt{player1\_board}: a 2D list representing the board of player 1 with size \texttt{size}.
+    \item \texttt{player2\_board}: a 2D list representing the board of player 2 with size \texttt{size}.
+    \item \texttt{player1\_ships}: a list of the lengths of the ships player 1 can choose from to place on their board. This will also be the starting amount of life for each of player 1's ships at the beginning of the game being played.
+    \item \texttt{player2\_ships}: a list of the lengths of the ships player 2 can choose from to place on their board. This will also be the starting amount of life for each of player 2's ships at the beginning of the game being played.
+\end{itemize}
+For example, if we had the following code
+\begin{verbatim}
+ships = [2,3]
+p1_board, p2_board, p1_ships, p2_ships = init_boards_and_ships(ships, 3)
+\end{verbatim}
+Printing \texttt{player1\_ships} and \texttt{player2\_ships} should output
+\begin{verbatim}
+[2,3]
+[2,3]
+\end{verbatim}
+\textit{Hints:} How will you ensure that \texttt{player1\_ships} and \texttt{player2\_ships} can be updated separately during the game? You have written all of the necessary functions already, this function should be only 4 lines and a return statement.\\\\
+\textit{Related Reading:} 7.3, 8.6, 8.7
+
+\subsection{prepare\_boards()}
+This function takes 4 inputs - boards for players 1 and 2 and lists of ships for players 1 and 2 - and prompts first player 1 then player 2 to place all their ships onto their boards. After player 1 is done positioning ships you should prompt the user to confirm that there will be a switch for player 2 to begin placing ships. This prompt can be anything as long as the user has to enter something.\\\\
+\textit{Hint:} You have functions that implemented all three of these steps. This function should only be 3 lines of code.\\\\
+\textit{Related Reading:} 8.5, 8.6
+
+\section{Playing 2 Player Game}
+In this task, you will be writing the battleship game execution functions in \texttt{two\_player\_battleships.py}.
+
+\subsection{game\_over()}
+This function takes a list of ships for player 1 and a list of ships for player 2 and returns \texttt{True} if the game is over and \texttt{False} otherwise.\\\\
+\textit{Hint:} When is a 2 player game over? Or, as noted in the Introduction, when has one of the players won?\\\\
+\textit{Related Reading:} 2.2, 3.3, 4.2, 6.2, 8.3, 8.4
+
+\subsection{play\_game()}
+This function takes 4 inputs, lists of ships for player 1 and player 2 and boards for player 1 and player 2 with their ships placed on their boards. This function should run a 2 player game and returns 1 if player 1 won and 2 if player 2 won. The game should start on player 1 and until the game is over
+\begin{enumerate}
+    \item Display the current player's record of hits and misses.
+    \item Have the player select a position to target.
+    \item Process the player's position.
+    \item If it was a miss, go to the next player. Moving to the next player should prompt the user for confirmation with any prompt. 
+\end{enumerate}
+You are allowed to print additional information in this function, but you must print the current player's record at the beginning of each iteration until the game is over.\\\\
+\textit{Hint:} This function is somewhat complex because you need to fully understand all the functions you have written and how to use them.
+\begin{enumerate}
+    \item The primary challenge of this function is managing who is the current player as well the board and ships they will be targeting.
+    
+    \item Steps 1-3 can be implemented in one line \textit{each} as you have functions that already implement these operations. You will need to choose what you pass into these functions (carefully).
+    
+    \item You also have a function to implement part of step 4 and a function to check if the game is over.
+    
+    \item If you don't display anything to the user from this function besides their record and use ternary operators extensively, this function can be written in 10 lines of code.
+\end{enumerate}
+\textit{Related Reading:} 3.6, 4.1, 8.6
+
+\section{Main script}
+In this task, you will be writing the main script that runs the game with any board size and collection of ships you want.\\\\
+\textit{Hint:} You have implemented all of the necessary functions to initialize, prepare, and play a 2 player game. This should only be 3 lines of code.\\\\
+\textit{Related Reading}: 8.6, 10.1
+
+\end{document}
+
+
